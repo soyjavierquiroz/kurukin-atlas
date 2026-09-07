@@ -107,4 +107,3 @@ class AssetMetadataV1(ProducerModel):
     source_timeline: dict[str, Any] | list[Any] | None = None
     audio: dict[str, Any] | list[Any] | None = None
     export: dict[str, Any] | list[Any] | None = None
-

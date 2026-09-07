@@ -133,6 +133,22 @@ def test_safe_package_paths(tmp_path):
             safe_package_path(tmp_path, unsafe)
 
 
+def test_safe_package_path_rejects_package_local_symlink_to_outside(tmp_path):
+    source_base_uri = tmp_path / "source"
+    source_base_uri.mkdir()
+    outside_file = tmp_path / "outside.mp4"
+    outside_file.write_bytes(b"outside")
+    package_local_name = "looks-package-local.mp4"
+    symlink = source_base_uri / package_local_name
+    try:
+        symlink.symlink_to(outside_file)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
+
+    with pytest.raises(UnsafePackagePathError):
+        safe_package_path(source_base_uri, package_local_name)
+
+
 def test_deterministic_identity_ignores_slug_and_path():
     uid = atlas_asset_uid("movie_broll_extractor", "movie", "asset")
     assert uid == atlas_asset_uid("movie_broll_extractor", "movie", "asset")

@@ -1,0 +1,179 @@
+{
+  "analysis": {
+    "final_asset_semantics_validated": true,
+    "generated_at": "durable",
+    "producer": "movie_broll_extractor",
+    "producer_version": "0.1.0",
+    "profile": "pilot-finalization-3e.2.2",
+    "semantic_ready": true,
+    "source_video_analyzed": true
+  },
+  "asset": {
+    "id": "rc162",
+    "slug": "pareja-conversando-de-manera-cercana-en-un-entor",
+    "source_movie_id": "romper-el-circulo"
+  },
+  "audio": {
+    "speech_present": {
+      "confidence": 1.0,
+      "source": "export_contract",
+      "value": false
+    }
+  },
+  "editorial": {
+    "action_or_moment_complete": "true",
+    "decision": "KEEP",
+    "editorial_confidence": "medium",
+    "negative_use_cases_es": [
+      "Secuencias de acción rápida",
+      "Conflicto violento directo"
+    ],
+    "reason": "La secuencia muestra un intercambio de diálogo claro y completo en plano/contraplano.",
+    "reusable_broll": true,
+    "search_terms_es": [
+      "pareja",
+      "conversación",
+      "interior",
+      "diálogo"
+    ],
+    "standalone_meaning_es": "Una pareja conversando de manera cercana en un entorno íntimo.",
+    "status": "VALIDATED",
+    "use_cases_es": [
+      "Escena de diálogo romántico en el hogar",
+      "Interacción de pareja en interiores"
+    ]
+  },
+  "export": {
+    "reframe_applied": true,
+    "reframe_profile": "local shot-aware subject track 3:4 crop"
+  },
+  "media": {
+    "horizontal": {
+      "aspect_ratio": "12:5",
+      "duration_seconds": 5.797458,
+      "export_mode": "source_encode",
+      "file": "rc162-pareja-conversando-de-manera-cercana-en-un-entor.mp4",
+      "fps": 23.976023976023978,
+      "generation_from_source": 1,
+      "height": 800,
+      "mime_type": "video/mp4",
+      "orientation": "landscape",
+      "semantic_validated": true,
+      "sha256": "2a0b758e53a73114281cd4b9a3c288c9c3f03feedfed1cc84f885d78de7c1262",
+      "size_bytes": 5522121,
+      "source_media": "movie.mp4",
+      "technical_validated": true,
+      "thumbnail": {
+        "file": "rc162-pareja-conversando-de-manera-cercana-en-un-entor.jpg",
+        "mime_type": "image/jpeg",
+        "sha256": "fbc4ca752a500882056507e46c9ed61b11cdec6b232ea9ab2194335700078cf6",
+        "size_bytes": 212874,
+        "timestamp_seconds": 2.877875
+      },
+      "width": 1920
+    },
+    "vertical": {
+      "aspect_ratio": "3:4",
+      "duration_seconds": 5.797458317018825,
+      "export_mode": "source_crop_encode",
+      "file": "vrc162-pareja-conversando-de-manera-cercana-en-un-entor.mp4",
+      "fps": 23.976024043494412,
+      "generation_from_source": 1,
+      "height": 800,
+      "mime_type": "video/mp4",
+      "orientation": "portrait",
+      "semantic_validated": true,
+      "sha256": "dbd5db3212f37458b878cb19bede329c7f9247a5c8190958e8f7a13c8a60913c",
+      "size_bytes": 3654496,
+      "source_media": "movie.mp4",
+      "technical_validated": true,
+      "thumbnail": {
+        "file": "vrc162-pareja-conversando-de-manera-cercana-en-un-entor.jpg",
+        "mime_type": "image/jpeg",
+        "sha256": "78bddad97980dfbd43957fe5c1c52e79ecf7780cb25bc446b7422f706d255869",
+        "size_bytes": 100818,
+        "timestamp_seconds": 2.877874991901431
+      },
+      "width": 600
+    }
+  },
+  "narrative": {
+    "interaction_context": [
+      "conflict"
+    ],
+    "literal_transcription": false,
+    "segment_ids": [
+      "NARR_000045"
+    ],
+    "summary_es": [
+      "Ryle confronta violentamente a Lily obligándola a leer un artículo donde su ex revela el origen de su restaurante, culminando en un enfrentamiento físico forcejeado."
+    ],
+    "themes": [],
+    "tone": [
+      "angry"
+    ]
+  },
+  "schema_version": "asset_metadata_v1",
+  "source": {
+    "movie_sha256": "55ceaa400da3407d6b55bb675c0b8f1cc420cd79f823ca158738256a444fab9d"
+  },
+  "source_timeline": {
+    "end_seconds": 5424.7109,
+    "narrative_segment_ids": [
+      "NARR_000045"
+    ],
+    "start_seconds": 5418.9135,
+    "technical_shot_ids": [
+      "FULL_SHOT_1231",
+      "FULL_SHOT_1232"
+    ],
+    "visual_event_id": "VE_e9b1aaa76946cce9"
+  },
+  "visual": {
+    "actions": [
+      "hablar",
+      "mirar"
+    ],
+    "final_vertical": {
+      "reframe_algorithm_version": "3e.2.3.8-source-preserving-export-v7-target-binding",
+      "reframe_fingerprint": "5cbbba04e3d909681d3258a7f423ccd348d50108126fa9856c110d0417d02388",
+      "validation_status": "PASS",
+      "vertical_validation_version": "3e.2.3.10-post-render-person-audit-v1"
+    },
+    "interaction_labels": [
+      "talking_face_to_face"
+    ],
+    "objects": [
+      "ropa"
+    ],
+    "people": {
+      "composition": "two_person",
+      "contains_people": true,
+      "overall_presentation": "mixed",
+      "people_count": 2,
+      "primary_subject": {
+        "frame_role": "primary",
+        "position": "left",
+        "presentation": "woman"
+      }
+    },
+    "relationships": [
+      {
+        "confidence": 0.6,
+        "source": "srt",
+        "type": "romantic_partner"
+      }
+    ],
+    "rendition_overrides": {},
+    "setting": "interior",
+    "subjects": [
+      "hombre",
+      "mujer"
+    ],
+    "summary_es": "Una mujer y un hombre conversan en un interior cálidamente iluminado en una plano contra plano.",
+    "visible_emotions": [
+      "smiling",
+      "neutral"
+    ]
+  }
+}

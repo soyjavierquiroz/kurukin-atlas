@@ -13,15 +13,15 @@ from app.ingest.catalog import (
     CatalogInputError,
     CatalogPlacement,
     UnsupportedRenditionOverrides,
-    VerifiedRenditionLocation,
-    VerifiedStorageManifest,
     ingest_transition,
     logical_asset_values,
-    observed_package_fingerprint,
     rendition_semantic_overrides,
     semantics_values,
 )
+from app.ingest.fingerprint import observed_package_fingerprint
 from app.ingest.normalize import normalize_metadata
+from app.storage.contracts import VerifiedRenditionLocation, VerifiedStorageManifest
+from app.storage.errors import StorageInputError
 
 
 GOLDEN = Path(__file__).parent / "fixtures/mbe/rc162/rc162-pareja-conversando-de-manera-cercana-en-un-entor.json"
@@ -58,9 +58,9 @@ def test_catalog_placement_invariants() -> None:
 
 
 def test_verified_storage_requires_exact_nonempty_locations_and_never_uses_source_uri() -> None:
-    with pytest.raises(CatalogInputError):
+    with pytest.raises(StorageInputError):
         VerifiedRenditionLocation("", "atlas://final/h.jpg")
-    with pytest.raises(CatalogInputError):
+    with pytest.raises(StorageInputError):
         VerifiedStorageManifest(horizontal=VerifiedRenditionLocation("a", "b"), vertical=None)  # type: ignore[arg-type]
     request = CatalogIngestRequest(
         normalized_asset=normalized(), placement=CatalogPlacement("general"), verified_storage_manifest=locations(),

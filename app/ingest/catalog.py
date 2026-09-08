@@ -6,8 +6,6 @@ locations are verified inputs from the handoff/orchestration layer.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import uuid
 from dataclasses import dataclass
@@ -17,6 +15,8 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ingest.fingerprint import observed_package_fingerprint
+from app.storage.contracts import VerifiedRenditionLocation, VerifiedStorageManifest
 from app.ingest.normalize import NormalizedAsset, NormalizedRendition
 from app.models import AssetRendition, AssetSemantics, IngestRecord, LogicalAsset
 
@@ -70,32 +70,6 @@ class CatalogPlacement:
 
 
 @dataclass(frozen=True)
-class VerifiedRenditionLocation:
-    """Already-verified final locations for one video rendition and its thumbnail."""
-
-    storage_uri: str
-    thumbnail_uri: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.storage_uri, str) or not self.storage_uri.strip():
-            raise CatalogInputError("storage_uri must be a non-empty string")
-        if not isinstance(self.thumbnail_uri, str) or not self.thumbnail_uri.strip():
-            raise CatalogInputError("thumbnail_uri must be a non-empty string")
-
-
-@dataclass(frozen=True)
-class VerifiedStorageManifest:
-    """The exactly four verified locators required for the two Atlas renditions."""
-
-    horizontal: VerifiedRenditionLocation
-    vertical: VerifiedRenditionLocation
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.horizontal, VerifiedRenditionLocation) or not isinstance(self.vertical, VerifiedRenditionLocation):
-            raise CatalogInputError("storage manifest requires horizontal and vertical verified locations")
-
-
-@dataclass(frozen=True)
 class CatalogIngestRequest:
     normalized_asset: NormalizedAsset
     placement: CatalogPlacement
@@ -124,26 +98,6 @@ class CatalogResult:
     logical_asset_created: bool
     package_changed: bool
     ingest_state: str
-
-
-def observed_package_fingerprint(asset: NormalizedAsset) -> str:
-    """Return a stable SHA-256 fingerprint of meaningful validated package content."""
-
-    canonical = {
-        "natural_key": {
-            "producer": asset.producer,
-            "source_movie_id": asset.source_movie_id,
-            "producer_asset_id": asset.producer_asset_id,
-        },
-        "source_movie_sha256": asset.source_movie_sha256,
-        "renditions": {
-            "horizontal": {"sha256": asset.horizontal.sha256, "thumbnail_sha256": asset.horizontal.thumbnail.get("sha256")},
-            "vertical": {"sha256": asset.vertical.sha256, "thumbnail_sha256": asset.vertical.thumbnail.get("sha256")},
-        },
-        "raw_producer_metadata": asset.raw_producer_metadata,
-    }
-    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def rendition_semantic_overrides(overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:

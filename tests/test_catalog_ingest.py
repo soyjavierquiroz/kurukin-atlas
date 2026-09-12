@@ -60,14 +60,18 @@ def test_catalog_placement_invariants() -> None:
 def test_verified_storage_requires_exact_nonempty_locations_and_never_uses_source_uri() -> None:
     with pytest.raises(StorageInputError):
         VerifiedRenditionLocation("", "atlas://final/h.jpg")
+    assert VerifiedRenditionLocation("atlas://final/v.mp4", None).thumbnail_uri is None
     with pytest.raises(StorageInputError):
-        VerifiedStorageManifest(horizontal=VerifiedRenditionLocation("a", "b"), vertical=None)  # type: ignore[arg-type]
+        VerifiedRenditionLocation("atlas://final/v.mp4", "")
+    with pytest.raises(StorageInputError):
+        VerifiedStorageManifest({})
     request = CatalogIngestRequest(
         normalized_asset=normalized(), placement=CatalogPlacement("general"), verified_storage_manifest=locations(),
         source_base_uri="file:///mbe/outbox/rc162", package_basename="rc162", destination_verified_at=datetime.now(timezone.utc),
         observed_package_fingerprint=observed_package_fingerprint(normalized()),
     )
     assert request.verified_storage_manifest.horizontal.storage_uri != request.source_base_uri
+    assert request.verified_storage_manifest.horizontal.thumbnail_uri is not None
     with pytest.raises(CatalogInputError):
         CatalogIngestRequest(
             normalized_asset=normalized(), placement=CatalogPlacement("general"), verified_storage_manifest=locations(),
@@ -134,8 +138,8 @@ def test_rendition_override_extraction_is_conservative() -> None:
 def test_mapping_preserves_identity_visual_narrative_and_raw_editorial() -> None:
     asset = normalized()
     logical = logical_asset_values(asset, CatalogPlacement("title", title_id="romper-el-circulo", title_type="movie"))
-    assert (logical["producer"], logical["source_movie_id"], logical["producer_asset_id"]) == (
-        asset.producer, asset.source_movie_id, asset.producer_asset_id
+    assert (logical["producer"], logical["source_key"], logical["producer_asset_id"]) == (
+        asset.producer, asset.source_key, asset.producer_asset_id
     )
     assert asset.asset_uid == normalized().asset_uid
     semantics = semantics_values(asset)

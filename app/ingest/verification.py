@@ -35,36 +35,35 @@ def verify_cataloged_asset(session: Session, expectation: CatalogIngestRequest) 
     def natural_rows(model):
         return list(session.scalars(select(model).where(
             model.producer == asset.producer,
-            model.source_movie_id == asset.source_movie_id,
+            model.source_key == asset.source_key,
             model.producer_asset_id == asset.producer_asset_id,
         )))
 
     logical = _one(natural_rows(LogicalAsset), "LogicalAsset")
     _check_fields(logical, dict(
         asset_uid=asset.asset_uid, producer=asset.producer,
-        source_movie_id=asset.source_movie_id, producer_asset_id=asset.producer_asset_id,
+        source_key=asset.source_key, source_kind=asset.source_kind, producer_asset_id=asset.producer_asset_id,
         catalog_scope=placement.catalog_scope, title_id=placement.title_id,
         title_type=placement.title_type, brand_id=placement.brand_id,
         status="active", source_movie_sha256=asset.source_movie_sha256,
     ), "LogicalAsset")
 
     renditions = list(session.scalars(select(AssetRendition).where(AssetRendition.asset_uid == asset.asset_uid)))
-    if len(renditions) != 2 or {row.kind for row in renditions} != {"horizontal", "vertical"}:
-        raise CatalogVerificationError("expected exactly horizontal and vertical renditions")
-    overrides = rendition_semantic_overrides(asset.rendition_overrides)
+    if len(renditions) != len(asset.renditions) or {row.kind for row in renditions} != set(asset.renditions):
+        raise CatalogVerificationError("catalog rendition kinds do not exactly match normalized asset")
+    overrides = rendition_semantic_overrides(asset.rendition_overrides, set(asset.renditions))
     for row in renditions:
-        rendition = getattr(asset, row.kind)
-        location = getattr(expectation.verified_storage_manifest, row.kind)
+        rendition = asset.renditions[row.kind]
+        location = expectation.verified_storage_manifest.renditions[row.kind]
         fields = dict(asset_uid=asset.asset_uid, storage_uri=location.storage_uri,
                       thumbnail_uri=location.thumbnail_uri, sha256=rendition.sha256,
-                      thumbnail_sha256=rendition.thumbnail["sha256"],
+                      thumbnail_sha256=rendition.thumbnail.get("sha256"),
+                      thumbnail_size_bytes=rendition.thumbnail.get("size_bytes"),
                       technical_validated=rendition.technical_validated,
                       semantic_validated=rendition.semantic_validated,
                       semantic_overrides=overrides[row.kind])
         if rendition.size_bytes is not None:
             fields["size_bytes"] = rendition.size_bytes
-        if rendition.thumbnail.get("size_bytes") is not None:
-            fields["thumbnail_size_bytes"] = rendition.thumbnail["size_bytes"]
         _check_fields(row, fields, f"AssetRendition.{row.kind}")
 
     semantics = _one(list(session.scalars(select(AssetSemantics).where(
@@ -79,7 +78,7 @@ def verify_cataloged_asset(session: Session, expectation: CatalogIngestRequest) 
     ), "AssetSemantics")
 
     ingest = _one(natural_rows(IngestRecord), "IngestRecord")
-    _check_fields(ingest, dict(asset_uid=asset.asset_uid,
+    _check_fields(ingest, dict(asset_uid=asset.asset_uid, source_kind=asset.source_kind,
         observed_package_fingerprint=expectation.observed_package_fingerprint), "IngestRecord")
     if ingest.destination_verified_at is None or ingest.catalog_committed_at is None:
         raise CatalogVerificationError("IngestRecord handoff timestamps are missing")

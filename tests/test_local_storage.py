@@ -77,6 +77,7 @@ def test_success_and_idempotent_replay(tmp_path):
     assert len(list(base.iterdir())) == 5
     for kind in ('horizontal', 'vertical'):
         loc = getattr(first.manifest, kind)
+        assert loc.thumbnail_uri is not None
         expected = getattr(inputs[0].media, kind)
         for uri, item in ((loc.storage_uri, expected), (loc.thumbnail_uri, expected.thumbnail)):
             dest = uri_path(uri)

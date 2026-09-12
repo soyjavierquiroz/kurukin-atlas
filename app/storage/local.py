@@ -89,7 +89,7 @@ class LocalStorageBackend:
             raise StorageInputError("observed_package_fingerprint does not match normalized_asset")
         # Structural consistency only: do not repeat semantic/trust validation.
         identity = (metadata.analysis.producer, metadata.asset.source_movie_id, metadata.asset.id)
-        if identity != (asset.producer, asset.source_movie_id, asset.producer_asset_id) or asset.asset_uid != atlas_asset_uid(*identity):
+        if identity != (asset.producer, asset.source_key, asset.producer_asset_id) or asset.asset_uid != atlas_asset_uid(*identity):
             raise StorageInputError("metadata identity does not match normalized_asset")
         for kind in ("horizontal", "vertical"):
             producer = getattr(metadata.media, kind)
@@ -168,7 +168,7 @@ class LocalStorageBackend:
                 return VerifiedRenditionLocation((base / rendition.file).as_uri(),
                                                  (base / rendition.thumbnail.file).as_uri())
             return VerifiedStoredPackage(
-                manifest=VerifiedStorageManifest(location('horizontal'), location('vertical')),
+                manifest=VerifiedStorageManifest(horizontal=location('horizontal'), vertical=location('vertical')),
                 destination_verified_at=datetime.now(timezone.utc), destination_base_uri=base.as_uri(),
                 metadata_uri=(base / json_path.name).as_uri(), package_fingerprint=fingerprint, created=created,
             )

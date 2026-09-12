@@ -16,7 +16,7 @@ class LogicalAsset(Base):
 
     __tablename__ = "logical_assets"
     __table_args__ = (
-        UniqueConstraint("producer", "source_movie_id", "producer_asset_id", name="uq_logical_assets_producer_source_asset"),
+        UniqueConstraint("producer", "source_key", "producer_asset_id", name="uq_logical_assets_producer_source_asset"),
         CheckConstraint("catalog_scope IN ('title', 'brand', 'general')", name="ck_logical_assets_catalog_scope"),
         CheckConstraint("title_type IS NULL OR title_type IN ('movie', 'series')", name="ck_logical_assets_title_type"),
         CheckConstraint(
@@ -32,7 +32,8 @@ class LogicalAsset(Base):
     asset_uid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     producer: Mapped[str] = mapped_column(String, nullable=False)
     producer_asset_id: Mapped[str] = mapped_column(String, nullable=False)
-    source_movie_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    source_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    source_kind: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default=text("'active'"))
     catalog_scope: Mapped[str] = mapped_column(String, nullable=False)
     title_id: Mapped[str | None] = mapped_column(String)
@@ -64,7 +65,7 @@ class AssetRendition(Base):
     asset_uid: Mapped[uuid.UUID] = mapped_column(ForeignKey("logical_assets.asset_uid"), nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     storage_uri: Mapped[str] = mapped_column(Text, nullable=False)
-    thumbnail_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    thumbnail_uri: Mapped[str | None] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     thumbnail_sha256: Mapped[str | None] = mapped_column(String(64))
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
@@ -123,7 +124,7 @@ class IngestRecord(Base):
 
     __tablename__ = "ingest_records"
     __table_args__ = (
-        UniqueConstraint("producer", "source_movie_id", "producer_asset_id", name="uq_ingest_records_producer_source_asset"),
+        UniqueConstraint("producer", "source_key", "producer_asset_id", name="uq_ingest_records_producer_source_asset"),
         UniqueConstraint("asset_uid", name="uq_ingest_records_asset_uid"),
         CheckConstraint(
             "state IN ('discovered', 'validated', 'copying_to_final', 'final_verified', 'cataloged', "
@@ -135,7 +136,8 @@ class IngestRecord(Base):
     ingest_uid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     asset_uid: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("logical_assets.asset_uid"))
     producer: Mapped[str] = mapped_column(String, nullable=False)
-    source_movie_id: Mapped[str] = mapped_column(String, nullable=False)
+    source_key: Mapped[str] = mapped_column(String, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String, nullable=False)
     producer_asset_id: Mapped[str] = mapped_column(String, nullable=False)
     source_base_uri: Mapped[str] = mapped_column(Text, nullable=False)
     package_basename: Mapped[str] = mapped_column(String, nullable=False)

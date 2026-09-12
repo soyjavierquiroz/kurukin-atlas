@@ -90,6 +90,18 @@ class CatalogIngestRequest:
             raise CatalogInputError("observed_package_fingerprint must be lowercase SHA-256 hex")
         if self.observed_package_fingerprint != observed_package_fingerprint(self.normalized_asset):
             raise CatalogInputError("observed_package_fingerprint does not match normalized_asset")
+        expected = set(self.normalized_asset.renditions)
+        actual = set(self.verified_storage_manifest.renditions)
+        if actual != expected:
+            raise CatalogInputError("verified storage manifest rendition kinds must exactly match normalized asset")
+        for kind, rendition in self.normalized_asset.renditions.items():
+            thumbnail_declared = bool(rendition.thumbnail)
+            thumbnail_uri = self.verified_storage_manifest.renditions[kind].thumbnail_uri
+            if thumbnail_declared and thumbnail_uri is None:
+                raise CatalogInputError(f"{kind} thumbnail evidence requires a verified thumbnail_uri")
+            if not thumbnail_declared and thumbnail_uri is not None:
+                raise CatalogInputError(f"{kind} has no thumbnail evidence but received a verified thumbnail_uri")
+        rendition_semantic_overrides(self.normalized_asset.rendition_overrides, expected)
 
 
 @dataclass(frozen=True)
@@ -100,14 +112,17 @@ class CatalogResult:
     ingest_state: str
 
 
-def rendition_semantic_overrides(overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def rendition_semantic_overrides(overrides: dict[str, Any], expected_kinds: set[str] | None = None) -> dict[str, dict[str, Any]]:
     """Extract the only supported override shape without guessing producer semantics."""
 
+    expected_kinds = {"horizontal", "vertical"} if expected_kinds is None else expected_kinds
     if not overrides:
-        return {"horizontal": {}, "vertical": {}}
+        return {kind: {} for kind in expected_kinds}
     if not isinstance(overrides, dict) or not set(overrides) <= {"horizontal", "vertical"}:
         raise UnsupportedRenditionOverrides("rendition overrides may contain only horizontal and vertical keys")
-    result = {"horizontal": {}, "vertical": {}}
+    if not set(overrides) <= expected_kinds:
+        raise UnsupportedRenditionOverrides("rendition override cannot target an absent rendition")
+    result = {kind: {} for kind in expected_kinds}
     for kind, value in overrides.items():
         if not isinstance(value, dict):
             raise UnsupportedRenditionOverrides(f"rendition override for {kind} must be an object")
@@ -120,7 +135,8 @@ def logical_asset_values(asset: NormalizedAsset, placement: CatalogPlacement) ->
 
     return {
         "producer": asset.producer,
-        "source_movie_id": asset.source_movie_id,
+        "source_key": asset.source_key,
+        "source_kind": asset.source_kind,
         "producer_asset_id": asset.producer_asset_id,
         "status": "active",
         "catalog_scope": placement.catalog_scope,
@@ -153,7 +169,7 @@ def semantics_values(asset: NormalizedAsset) -> dict[str, Any]:
         "setting": asset.setting,
         "people_json": asset.people_json,
         "relationships_json": asset.relationships_json,
-        "keywords": [],
+        "keywords": asset.keywords,
         "search_terms": asset.search_terms,
         "negative_use_cases": asset.negative_use_cases,
         "standalone_meaning": asset.standalone_meaning,
@@ -166,6 +182,9 @@ def semantics_values(asset: NormalizedAsset) -> dict[str, Any]:
             "producer_version": asset.producer_provenance.get("producer_version"),
             "audio": _present_or(asset.producer_provenance.get("audio"), {}),
             "export": _present_or(asset.producer_provenance.get("export"), {}),
+            # Curated normalizers store declared editorial/import provenance here;
+            # it is never inferred from pixels or query intent.
+            "producer_metadata": asset.producer_provenance,
         },
         "editorial_json": raw_editorial,
         "search_text": None,
@@ -229,16 +248,16 @@ def catalog_validated_asset(session: Session, request: CatalogIngestRequest) -> 
     """
 
     asset = request.normalized_asset
-    overrides = rendition_semantic_overrides(asset.rendition_overrides)
-    natural_key = (asset.producer, asset.source_movie_id, asset.producer_asset_id)
+    overrides = rendition_semantic_overrides(asset.rendition_overrides, set(asset.renditions))
+    natural_key = (asset.producer, asset.source_key, asset.producer_asset_id)
     logical = session.scalar(select(LogicalAsset).where(
         LogicalAsset.producer == natural_key[0],
-        LogicalAsset.source_movie_id == natural_key[1],
+        LogicalAsset.source_key == natural_key[1],
         LogicalAsset.producer_asset_id == natural_key[2],
     ))
     ingest = session.scalar(select(IngestRecord).where(
         IngestRecord.producer == natural_key[0],
-        IngestRecord.source_movie_id == natural_key[1],
+        IngestRecord.source_key == natural_key[1],
         IngestRecord.producer_asset_id == natural_key[2],
     ))
     if ingest is not None and ingest.asset_uid is not None and ingest.asset_uid != asset.asset_uid:
@@ -258,16 +277,17 @@ def catalog_validated_asset(session: Session, request: CatalogIngestRequest) -> 
         rendition.kind: rendition
         for rendition in session.scalars(select(AssetRendition).where(AssetRendition.asset_uid == asset.asset_uid))
     }
-    for kind, normalized_rendition, location in (
-        ("horizontal", asset.horizontal, request.verified_storage_manifest.horizontal),
-        ("vertical", asset.vertical, request.verified_storage_manifest.vertical),
-    ):
+    for kind, normalized_rendition in asset.renditions.items():
+        location = request.verified_storage_manifest.renditions[kind]
         rendition = existing_renditions.get(kind)
         values = rendition_values(normalized_rendition, location, overrides[kind])
         if rendition is None:
             session.add(AssetRendition(asset_uid=asset.asset_uid, kind=kind, **values))
         else:
             _apply_values(rendition, values)
+    for kind, rendition in existing_renditions.items():
+        if kind not in asset.renditions:
+            session.delete(rendition)
 
     semantics = session.get(AssetSemantics, asset.asset_uid)
     if semantics is None:
@@ -277,9 +297,13 @@ def catalog_validated_asset(session: Session, request: CatalogIngestRequest) -> 
 
     package_changed = ingest is None or ingest.observed_package_fingerprint != request.observed_package_fingerprint
     current_state, refresh_handoff = ingest_transition(ingest.state if ingest else None, package_changed)
+    if ingest is not None:
+        # source_kind is durable descriptive metadata, including for a byte-for-byte replay.
+        # This intentionally does not alter state or handoff timestamps by itself.
+        ingest.source_kind = asset.source_kind
     if ingest is None:
         ingest = IngestRecord(
-            asset_uid=asset.asset_uid, producer=asset.producer, source_movie_id=asset.source_movie_id,
+            asset_uid=asset.asset_uid, producer=asset.producer, source_key=asset.source_key, source_kind=asset.source_kind,
             producer_asset_id=asset.producer_asset_id, source_base_uri=request.source_base_uri,
             package_basename=request.package_basename, state=current_state,
             destination_verified_at=request.destination_verified_at,

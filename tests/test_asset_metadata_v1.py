@@ -7,6 +7,7 @@ import pytest
 
 from app.contracts.asset_metadata_v1 import AssetMetadataV1
 from app.ingest.normalize import atlas_asset_uid, normalize_metadata
+from app.ingest.fingerprint import observed_package_fingerprint
 from app.ingest.package import (
     PackageReadiness,
     UnsafePackagePathError,
@@ -156,6 +157,12 @@ def test_deterministic_identity_ignores_slug_and_path():
     assert uid != atlas_asset_uid("movie_broll_extractor", "other-movie", "asset")
     raw = golden_raw()
     normalized = normalize_metadata(golden_model(raw), raw)
+    assert normalized.source_key == "romper-el-circulo"
+    assert normalized.source_kind == "movie"
+    assert set(normalized.renditions) == {"horizontal", "vertical"}
+    assert normalized.asset_uid == atlas_asset_uid("movie_broll_extractor", "romper-el-circulo", "rc162")
+    assert str(normalized.asset_uid) == "0fb1e01e-ee06-5643-89cb-ad9493dd7506"
+    assert observed_package_fingerprint(normalized) == "e42e745a994db1a6d633d543b1bcea856c8a0aae66f3acc81371c2a7a7ce864a"
     changed = copy.deepcopy(raw)
     changed["asset"]["slug"] = "new-slug"
     assert normalized.asset_uid == normalize_metadata(golden_model(changed), changed).asset_uid

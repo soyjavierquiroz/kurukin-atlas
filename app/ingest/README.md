@@ -1,9 +1,10 @@
-# Synchronous P0 ingest
+# Synchronous MBE package ingest
 
 `orchestrator.ingest_package(json_path, placement, storage_backend,
 session_factory, stability_seconds=1.0, sleep=time.sleep)` processes one package.
 Pass an explicit `CatalogPlacement`, `StorageBackend`, and SQLAlchemy
-`sessionmaker`. Importing the orchestrator creates no DB or storage service.
+`sessionmaker`. It remains the MBE-only five-file (horizontal plus vertical)
+package path, not the future curated importer. Importing the orchestrator creates no DB or storage service.
 
 The sequence is safe UTF-8 JSON read → JSON/Pydantic parse → five-member
 readiness/stability → TRUST PRODUCER SEMANTICS → four-member source size/hash
@@ -20,6 +21,11 @@ metadata is retained without rewriting JSON or inferring semantics.
 Only the storage backend's VerifiedStoredPackage supplies destination locators
 and verification time. Source directory file URI and filename stem are operational
 provenance, never rendition locators or logical identity.
+
+Below this MBE boundary, normalized assets, verified storage manifests, catalog
+writing, and verification are rendition-generic (one or more supported kinds).
+Curated collection assets may be vertical-only and use explicit editorial,
+filename, or collection-default provenance without AI analysis.
 
 The orchestrator owns `session_factory.begin()`. The catalog writer flushes;
 successful context exit commits, and failure rolls back. No pre-catalog state

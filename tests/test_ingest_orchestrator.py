@@ -131,6 +131,7 @@ def catalog_rows(request, state='cataloged'):
          for kind in ('horizontal', 'vertical')],
         [SimpleNamespace(asset_uid=asset.asset_uid, **semantics_values(asset))],
         [SimpleNamespace(asset_uid=asset.asset_uid,
+                         source_kind=asset.source_kind,
                          observed_package_fingerprint=request.observed_package_fingerprint,
                          destination_verified_at=request.destination_verified_at,
                          catalog_committed_at=request.destination_verified_at, state=state)],
@@ -261,7 +262,7 @@ def test_verifier_states_and_queries(source, flow, state):
     queries = [str(call.args[0]) for call in session.scalars.call_args_list]
     assert len(queries) == 4
     for index in (0, 3):
-        assert all(f'{field} =' in queries[index] for field in ('producer', 'source_movie_id', 'producer_asset_id'))
+        assert all(f'{field} =' in queries[index] for field in ('producer', 'source_key', 'producer_asset_id'))
     for index in (1, 2):
         assert 'asset_uid =' in queries[index]
     assert len(session.mock_calls) == 4  # reads only
@@ -276,13 +277,13 @@ def test_verifier_rejects_corruption(source, flow, table, damage):
     if damage == 'fields':
         # Every checked field is independently corrupted, including separate semantic evidence.
         fields = [
-            ['asset_uid', 'producer', 'source_movie_id', 'producer_asset_id',
+            ['asset_uid', 'producer', 'source_key', 'source_kind', 'producer_asset_id',
              'catalog_scope', 'title_id', 'title_type', 'brand_id', 'status', 'source_movie_sha256'],
             ['asset_uid', 'kind', 'storage_uri', 'thumbnail_uri', 'sha256', 'thumbnail_sha256',
              'size_bytes', 'thumbnail_size_bytes', 'technical_validated', 'semantic_validated', 'semantic_overrides'],
             ['asset_uid', 'raw_producer_metadata', 'visual_summary', 'visible_emotions',
              'narrative_json', 'relationships_json', 'action_or_moment_complete', 'editorial_json'],
-            ['asset_uid', 'observed_package_fingerprint', 'destination_verified_at', 'catalog_committed_at', 'state'],
+            ['asset_uid', 'source_kind', 'observed_package_fingerprint', 'destination_verified_at', 'catalog_committed_at', 'state'],
         ][table]
         for field in fields:
             broken = copy.deepcopy(rows)

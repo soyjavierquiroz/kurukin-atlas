@@ -12,13 +12,15 @@ def observed_package_fingerprint(asset: NormalizedAsset) -> str:
     canonical = {
         "natural_key": {
             "producer": asset.producer,
-            "source_movie_id": asset.source_movie_id,
+            # This legacy label is intentionally frozen for fingerprint-v1 byte
+            # compatibility; Atlas's actual natural-key field is source_key.
+            "source_movie_id": asset.source_key,
             "producer_asset_id": asset.producer_asset_id,
         },
         "source_movie_sha256": asset.source_movie_sha256,
         "renditions": {
-            "horizontal": {"sha256": asset.horizontal.sha256, "thumbnail_sha256": asset.horizontal.thumbnail.get("sha256")},
-            "vertical": {"sha256": asset.vertical.sha256, "thumbnail_sha256": asset.vertical.thumbnail.get("sha256")},
+            kind: {"sha256": rendition.sha256, "thumbnail_sha256": rendition.thumbnail.get("sha256")}
+            for kind, rendition in asset.renditions.items()
         },
         "raw_producer_metadata": asset.raw_producer_metadata,
     }

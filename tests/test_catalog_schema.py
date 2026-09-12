@@ -32,13 +32,14 @@ def test_catalog_tables_are_registered_in_metadata() -> None:
 def test_logical_asset_identity_and_scope_constraints() -> None:
     table = LogicalAsset.__table__
 
-    assert ("producer", "source_movie_id", "producer_asset_id") in _unique_columns(table)
+    assert ("producer", "source_key", "producer_asset_id") in _unique_columns(table)
     assert {"ck_logical_assets_catalog_scope", "ck_logical_assets_catalog_scope_fields", "ck_logical_assets_title_type"} <= _check_names(table)
     assert {index.name for index in table.indexes} >= {
-        "ix_logical_assets_source_movie_id",
+        "ix_logical_assets_source_key",
         "ix_logical_assets_catalog_scope_title_id",
         "ix_logical_assets_catalog_scope_brand_id",
     }
+    assert table.c.source_kind.nullable is False
 
 
 def test_rendition_identity_and_kind_constraints() -> None:
@@ -48,6 +49,7 @@ def test_rendition_identity_and_kind_constraints() -> None:
     assert "ck_asset_renditions_kind" in _check_names(table)
     assert not any(constraint.columns.keys() == ["storage_uri"] for constraint in table.constraints if isinstance(constraint, UniqueConstraint))
     assert table.c.storage_uri.unique is not True
+    assert table.c.thumbnail_uri.nullable is True
 
 
 def test_semantics_uses_jsonb_and_text_not_a_vector_column() -> None:
@@ -62,12 +64,13 @@ def test_semantics_uses_jsonb_and_text_not_a_vector_column() -> None:
 def test_ingest_natural_key_and_state_constraint() -> None:
     table = IngestRecord.__table__
 
-    assert ("producer", "source_movie_id", "producer_asset_id") in _unique_columns(table)
+    assert ("producer", "source_key", "producer_asset_id") in _unique_columns(table)
     assert "ck_ingest_records_state" in _check_names(table)
+    assert table.c.source_kind.nullable is False
 
 
-def test_alembic_script_directory_loads_initial_revision() -> None:
+def test_alembic_script_directory_loads_head_revision() -> None:
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_current_head() == "20260906_0001"
+    assert script.get_current_head() == "20260912_0002"

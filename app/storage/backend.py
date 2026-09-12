@@ -21,4 +21,12 @@ def get_storage_backend(settings: "Settings") -> StorageBackend:
     if settings.storage_backend == "local":
         from app.storage.local import LocalStorageBackend
         return LocalStorageBackend(settings.storage_root)
+    if settings.storage_backend == "rclone_drive":
+        from app.storage.rclone_drive import RcloneDriveStorageBackend
+        return RcloneDriveStorageBackend(
+            binary=settings.rclone_binary,
+            remote=settings.rclone_remote,
+            root=settings.rclone_root,
+            lock_path=settings.rclone_lock_path,
+        )
     raise StorageConfigurationError(f"unsupported storage backend: {settings.storage_backend!r}")

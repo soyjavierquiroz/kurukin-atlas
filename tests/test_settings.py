@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.settings import Settings
 
 
@@ -42,3 +45,18 @@ def test_settings_repr_does_not_include_password() -> None:
 
     assert "db_password" not in repr(settings)
     assert "never-show-this" not in repr(settings)
+
+
+def test_rclone_drive_settings_require_safe_explicit_transport_values() -> None:
+    settings = make_settings(
+        storage_backend="rclone_drive",
+        rclone_binary="rclone",
+        rclone_remote="gdrive_javier:",
+        rclone_root="Javier/KURUKIN_ATLAS",
+    )
+    assert settings.rclone_remote == "gdrive_javier:"
+    assert settings.rclone_lock_path == "/opt/apps/kurukin-atlas/data/locks/rclone-drive.lock"
+    with pytest.raises(ValidationError, match="ending in ':'"):
+        make_settings(storage_backend="rclone_drive", rclone_remote="gdrive_javier", rclone_root="Javier/KURUKIN_ATLAS")
+    with pytest.raises(ValidationError, match="no traversal"):
+        make_settings(storage_backend="rclone_drive", rclone_remote="gdrive_javier:", rclone_root="../outside")

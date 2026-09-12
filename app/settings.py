@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -29,6 +29,28 @@ class Settings(BaseSettings):
     source_cleanup_enabled: bool
     storage_backend: str
     storage_root: str
+    rclone_binary: str = "rclone"
+    rclone_remote: str | None = None
+    rclone_root: str | None = None
+    rclone_lock_path: str = "/opt/apps/kurukin-atlas/data/locks/rclone-drive.lock"
+
+    @model_validator(mode="after")
+    def validate_rclone_drive_settings(self) -> "Settings":
+        """Keep local as the active default; validate Drive only when selected."""
+        if self.storage_backend != "rclone_drive":
+            return self
+        if not self.rclone_binary.strip():
+            raise ValueError("ATLAS_RCLONE_BINARY must be non-empty")
+        if not self.rclone_remote or not self.rclone_remote.strip() or not self.rclone_remote.endswith(":"):
+            raise ValueError("ATLAS_RCLONE_REMOTE must be a non-empty rclone remote ending in ':'")
+        if not self.rclone_root or not self.rclone_root.strip():
+            raise ValueError("ATLAS_RCLONE_ROOT must be non-empty")
+        if not self.rclone_lock_path or not self.rclone_lock_path.strip():
+            raise ValueError("ATLAS_RCLONE_LOCK_PATH must be non-empty")
+        from app.storage.rclone_drive import _validate_root, _validate_remote
+        _validate_remote(self.rclone_remote)
+        _validate_root(self.rclone_root)
+        return self
 
     @property
     def database_url(self) -> URL:

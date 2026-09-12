@@ -19,3 +19,7 @@ class StoragePathError(StorageError):
 
 class StorageConfigurationError(StorageInputError):
     """The configured storage backend is unsupported."""
+
+
+class RcloneTransportError(StorageError):
+    """The controlled rclone transport could not complete an operation."""

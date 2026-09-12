@@ -42,7 +42,58 @@ do not create directories. The root must be Atlas-owned: other processes
 must not relocate directories or mutate published versions. Atomic publication
 provides visibility, not a power-loss durability guarantee (no fsync protocol).
 
-`get_storage_backend(settings)` supports only `local`; other names raise
-`StorageConfigurationError`. No catalog writes or source cleanup occur here.
-The next handoff stages remain catalog commit, catalog verification, and only
-then a separately implemented exact-source-package cleanup.
+`get_storage_backend(settings)` supports `local` (the unchanged active default)
+and inactive-on-config `rclone_drive`. No catalog writes or source cleanup occur
+here. The next handoff stages remain catalog commit, catalog verification, and
+only then a separately implemented exact-source-package cleanup.
+
+## P0 rclone Google Drive custody
+
+`RcloneDriveStorageBackend` uses explicit rclone CLI argument arrays (`mkdir`,
+`lsjson`, `copyto`, `moveto`, `cat`, and narrowly scoped best-effort `purge`); it does not
+mount Drive, inspect rclone configuration, or use a shell. Construction has no
+remote or filesystem side effects. Its command runner is injectable, so tests
+never access rclone or Google Drive.
+
+The frozen final layout is:
+
+```
+<root>/assets/<encoded-producer>/<encoded-source_key>/
+  <encoded-producer_asset_id>--<full-package-fingerprint>/<original-member>
+```
+
+For rc162 this is conceptually
+`Javier/KURUKIN_ATLAS/assets/movie_broll_extractor/romper-el-circulo/rc162--<full-sha256>/`.
+Identity components use reversible percent encoding (for example,
+`collection:deluxe` becomes `collection%3Adeluxe`); Drive paths and Drive IDs
+are custody details, not Atlas identity.
+
+Publication is:
+
+```
+source -> unique remote _staging UUID -> remote hash verification
+       -> server-side directory moveto -> final remote hash verification
+       -> VerifiedStoredPackage -> catalog
+```
+
+Only the exact five MBE members are hashed locally and uploaded individually
+with `copyto`; no local media staging copy is made. `lsjson --hash` establishes
+the exact remote member set, size, and SHA-256. If an otherwise ordinary object
+does not expose SHA-256, the backend uses streamed `rclone cat` hashing; it
+never accepts size alone.
+
+An exact existing final directory is reverified and returned with
+`created=False`. A missing, extra, malformed, wrong-size, or wrong-hash final
+is an immutable integrity incident: it is never merged, repaired, overwritten,
+or removed. Failures before promotion may best-effort purge only that call's
+UUID staging directory. If `moveto` succeeded but final verification fails, the
+final is intentionally preserved as evidence and is not purged.
+
+P0 uses a local `flock` lock file created only by `store_package()` (by default
+`/opt/apps/kurukin-atlas/data/locks/rclone-drive.lock`). This assumes
+all Drive writers run through this Atlas host (or otherwise cooperate on this
+same lock); it is not distributed locking. Returned internal URIs use
+`rclone://<remote-without-colon>/<remote-relative-path>` and always refer to
+the final directory or final members, never staging paths or Drive IDs. URI
+serialization escapes physical percent signs too, so a single normal URI decode
+recovers the exact rclone path.

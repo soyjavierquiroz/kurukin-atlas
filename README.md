@@ -67,3 +67,20 @@ The package fingerprint remains v1-compatible for existing MBE custody records:
 its canonical JSON intentionally retains the legacy `source_movie_id` label,
 but the value is Atlas's `source_key`. This is compatibility serialization, not
 Atlas terminology.
+
+## Drive custody (inactive until explicitly configured)
+
+Atlas also contains an `rclone_drive` storage backend for the frozen Google
+Shared Drive root `gdrive_javier:Javier/KURUKIN_ATLAS`. It uses explicit rclone
+CLI operations, not an rclone filesystem mount. Final Drive custody is
+`assets/<encoded-producer>/<encoded-source_key>/<encoded-producer_asset_id>--<full-fingerprint>/`.
+Drive paths and Drive IDs are not Atlas identity; the natural key remains
+`producer + source_key + producer_asset_id`.
+
+The local storage backend remains the current behavior. Selecting Drive requires
+explicit `ATLAS_STORAGE_BACKEND=rclone_drive`, `ATLAS_RCLONE_BINARY`,
+`ATLAS_RCLONE_REMOTE`, and `ATLAS_RCLONE_ROOT`; this repository does not alter
+`.env` or rclone configuration. Publication verifies unique remote staging,
+server-side promotion, and final bytes before catalog handoff. See
+`app/storage/README.md` for replay, corruption, hash fallback, and P0 writer-lock
+semantics.

@@ -49,6 +49,14 @@ only then a separately implemented exact-source-package cleanup.
 
 ## P0 rclone Google Drive custody
 
+`RcloneDrivePublisher` is the shared low-level publisher for explicit remote
+members. It owns identity-derived Drive paths, the writer lock, UUID staging,
+`copyto`, exact staging/final verification, absence recheck, `moveto`, SHA-256
+fallback via streamed `cat`, immutable replay, URI escaping, and staging-only
+purge safety. `RcloneDriveStorageBackend` is the MBE five-member adapter;
+`RcloneDriveCuratedStorageBackend` is its curated counterpart, so neither path
+duplicates the promotion algorithm.
+
 `RcloneDriveStorageBackend` uses explicit rclone CLI argument arrays (`mkdir`,
 `lsjson`, `copyto`, `moveto`, `cat`, and narrowly scoped best-effort `purge`); it does not
 mount Drive, inspect rclone configuration, or use a shell. Construction has no
@@ -89,7 +97,7 @@ or removed. Failures before promotion may best-effort purge only that call's
 UUID staging directory. If `moveto` succeeded but final verification fails, the
 final is intentionally preserved as evidence and is not purged.
 
-P0 uses a local `flock` lock file created only by `store_package()` (by default
+P0 uses a local `flock` lock file created only by a publication call (by default
 `/opt/apps/kurukin-atlas/data/locks/rclone-drive.lock`). This assumes
 all Drive writers run through this Atlas host (or otherwise cooperate on this
 same lock); it is not distributed locking. Returned internal URIs use
@@ -97,3 +105,12 @@ same lock); it is not distributed locking. Returned internal URIs use
 the final directory or final members, never staging paths or Drive IDs. URI
 serialization escapes physical percent signs too, so a single normal URI decode
 recovers the exact rclone path.
+
+For curated vertical-only custody, the generic publisher receives exactly two
+`RemoteMember` records: the original MP4 and `atlas-curated.json`. The returned
+manifest has `renditions == {"vertical"}`, a final video URI, and
+`thumbnail_uri=None`; there is no fabricated horizontal rendition or thumbnail.
+For example, a DELUXE revision is physically stored below
+`assets/kurukin_curated/collection%3Adeluxe/<asset-id>--<fingerprint>/`.
+The `rclone://` URI serializes that physical `%3A` as `%253A`, so one URI decode
+recovers the exact remote-relative name.

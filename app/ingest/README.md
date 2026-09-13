@@ -27,6 +27,47 @@ writing, and verification are rendition-generic (one or more supported kinds).
 Curated collection assets may be vertical-only and use explicit editorial,
 filename, or collection-default provenance without AI analysis.
 
+## Curated single-asset ingest
+
+`curated.ingest_curated_file(CuratedImportSpec(...), curated_storage_backend,
+session_factory)` is a separate path for pre-cut collection media. It does not
+call `ingest_package()`, which remains the frozen MBE producer-package path.
+
+MBE packages are producer-authored, require horizontal and vertical files, real
+thumbnails, and their rich MBE semantic evidence. Curated assets are one or
+more explicitly described pre-cut renditions; the initial DELUXE and NATURE
+imports are vertical-only and require neither a thumbnail nor AI/VLM analysis.
+
+The importer accepts only an existing, non-empty regular non-symlink local MP4.
+It snapshots size and nanosecond mtime before streaming SHA-256 and ffprobe,
+then checks the snapshot again. A changed or disappeared source returns
+`NOT_READY` before storage is called. ffprobe is an injectable argv-only,
+timeout-bounded technical probe: dimensions, duration, frame rate, codec-format
+facts, orientation, and aspect ratio are allowed; it never derives people,
+objects, action, emotion, luxury, nature, or any other pixel semantics.
+
+Identity is frozen as `kurukin_curated`, `collection`, and
+`collection:<collection_id>`, with a caller-provided stable ID (or filename
+stem). Thus a DELUXE source defaults to
+`(kurukin_curated, collection:deluxe, <stem>)`; NATURE similarly uses
+`(kurukin_curated, collection:nature, <stem>)`. Both initially use the single
+Atlas `general` catalog placement, never collection-named scopes.
+
+Caller-supplied claims are retained only with one of these provenances:
+`editorial`, `filename`, or `collection_defaults`; `none` is valid only with no
+semantic claims. UNKNOWN stays UNKNOWN. The optional filename helper merely
+strips an extension/prefix and normalizes underscores or hyphens to spaces; it
+does no NLP, translation, or inference.
+
+Curated Drive custody contains exactly the original video and Atlas-generated
+`atlas-curated.json`. The manifest is a deterministic UTF-8 compact JSON
+serialization of `CuratedAssetV1.model_dump(mode="json")` using sorted keys and
+`ensure_ascii=False`; its temporary local file is removed after the operation.
+No local copy of the video is made. Existing matching immutable revisions are
+fully reverified and replay with `created=False`; corrected source bytes or
+explicit metadata keep the same natural-key asset UID but produce a new
+fingerprint/revision and update the active catalog rendition after verification.
+
 The orchestrator owns `session_factory.begin()`. The catalog writer flushes;
 successful context exit commits, and failure rolls back. No pre-catalog state
 commits are added. A separate `verify_cataloged_asset(session, expectation)`

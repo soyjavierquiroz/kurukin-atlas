@@ -6,11 +6,11 @@ from app.storage.errors import (
     RcloneTransportError, StorageConfigurationError, StorageError, StorageInputError, StorageIntegrityError, StoragePathError,
 )
 from app.storage.local import LocalStorageBackend
-from app.storage.rclone_drive import RcloneDriveStorageBackend
+from app.storage.rclone_drive import RcloneDriveCuratedStorageBackend, RcloneDrivePublisher, RcloneDriveStorageBackend
 
 __all__ = [
     "StorageBackend", "get_storage_backend", "LocalStorageBackend", "VerifiedRenditionLocation",
     "VerifiedStorageManifest", "VerifiedStoredPackage", "StorageError", "StorageInputError",
     "StorageIntegrityError", "StoragePathError", "StorageConfigurationError", "RcloneTransportError",
-    "RcloneDriveStorageBackend",
+    "RcloneDriveStorageBackend", "RcloneDriveCuratedStorageBackend", "RcloneDrivePublisher",
 ]

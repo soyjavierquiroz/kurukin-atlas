@@ -9,9 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from app.contracts.asset_metadata_v1 import AssetMetadataV1
+from app.contracts.curated_asset_v1 import CuratedAssetV1
+from app.ingest.curated import canonical_curated_manifest, normalize_curated_asset
 from app.ingest.fingerprint import observed_package_fingerprint
 from app.ingest.normalize import normalize_metadata
-from app.storage import RcloneDriveStorageBackend, StorageInputError, StorageIntegrityError, StoragePathError, get_storage_backend
+from app.storage import (RcloneDriveCuratedStorageBackend, RcloneDriveStorageBackend,
+                         StorageInputError, StorageIntegrityError, StoragePathError, get_storage_backend)
 from app.storage.errors import RcloneTransportError
 from app.storage.rclone import RcloneCommandResult
 from app.storage.rclone_drive import encode_path_component
@@ -330,3 +333,86 @@ def test_malformed_json_timeout_and_missing_executable_are_transport_errors(tmp_
             raise RcloneTransportError("rclone executable was not found")
     with pytest.raises(RcloneTransportError, match="not found"):
         store(backend(Missing(), tmp_path / "missing"), package(tmp_path / "missing"))
+
+
+def test_curated_vertical_publish_uses_two_members_and_exact_replay(tmp_path):
+    source = tmp_path / "deluxe_0001.mp4"
+    source.write_bytes(b"curated-video")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    metadata = CuratedAssetV1.model_validate({
+        "schema_version": "curated_asset_v1", "collection_id": "deluxe", "producer_asset_id": "deluxe_0001",
+        "renditions": [{"kind": "vertical", "filename": source.name, "sha256": digest,
+                        "size_bytes": source.stat().st_size, "technical_validated": True,
+                        "semantic_validated": False, "thumbnail": {}}],
+    })
+    asset = normalize_curated_asset(metadata, metadata.model_dump(mode="json"))
+    manifest = tmp_path / "atlas-curated.json"
+    manifest.write_bytes(canonical_curated_manifest(metadata))
+    fake = FakeRclone()
+    storage = RcloneDriveCuratedStorageBackend(binary="rclone", remote="gdrive_javier:", root="Javier/KURUKIN_ATLAS",
+                                                runner=fake, lock_path=tmp_path / "drive.lock")
+    fingerprint = observed_package_fingerprint(asset)
+    first = storage.store_curated_asset(metadata, asset, source, manifest, fingerprint)
+    copied = [command for command in fake.commands if command[1] == "copyto"]
+    assert len(copied) == 2
+    assert {Path(command[3]).name for command in copied} == {source.name, "atlas-curated.json"}
+    final_dir = unquote(urlsplit(first.destination_base_uri).path.lstrip("/"))
+    final_members = {Path(path).name: payload for path, payload in fake.files.items() if path.startswith(final_dir + "/")}
+    assert set(final_members) == {source.name, "atlas-curated.json"}
+    assert json.loads(final_members["atlas-curated.json"]) == metadata.model_dump(mode="json")
+    assert any("collection%3Adeluxe" in " ".join(command) for command in fake.commands)
+    assert first.created and first.manifest.renditions.keys() == {"vertical"}
+    assert first.manifest.vertical.thumbnail_uri is None
+    assert "collection%253Adeluxe" in first.destination_base_uri
+    fake.commands.clear()
+    replay = storage.store_curated_asset(metadata, asset, source, manifest, fingerprint)
+    assert not replay.created
+    assert command_names(fake) == ["mkdir", "lsjson", "lsjson"]
+
+
+def test_curated_source_byte_mismatch_is_rejected_before_any_rclone_command(tmp_path):
+    source = tmp_path / "nature_0001.mp4"
+    original = b"original curated bytes"
+    replacement = b"replacement-curatedxxx"  # deliberately the same length
+    assert len(original) == len(replacement)
+    source.write_bytes(original)
+    digest = hashlib.sha256(original).hexdigest()
+    metadata = CuratedAssetV1.model_validate({
+        "schema_version": "curated_asset_v1", "collection_id": "nature", "producer_asset_id": "nature_0001",
+        "renditions": [{"kind": "vertical", "filename": source.name, "sha256": digest,
+                        "size_bytes": len(original), "thumbnail": {}}],
+    })
+    asset = normalize_curated_asset(metadata, metadata.model_dump(mode="json"))
+    manifest = tmp_path / "atlas-curated.json"
+    manifest.write_bytes(canonical_curated_manifest(metadata))
+    source.write_bytes(replacement)
+    fake = FakeRclone()
+    storage = RcloneDriveCuratedStorageBackend(binary="rclone", remote="gdrive_javier:", root="Javier/KURUKIN_ATLAS",
+                                                runner=fake, lock_path=tmp_path / "drive.lock")
+    with pytest.raises(StorageIntegrityError, match="source bytes"):
+        storage.store_curated_asset(metadata, asset, source, manifest, observed_package_fingerprint(asset))
+    assert fake.commands == []
+
+
+def test_curated_source_symlink_replacement_is_rejected_before_any_rclone_command(tmp_path):
+    source = tmp_path / "nature_0001.mp4"
+    source.write_bytes(b"curated source bytes")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    metadata = CuratedAssetV1.model_validate({
+        "schema_version": "curated_asset_v1", "collection_id": "nature", "producer_asset_id": "nature_0001",
+        "renditions": [{"kind": "vertical", "filename": source.name, "sha256": digest,
+                        "size_bytes": source.stat().st_size, "thumbnail": {}}],
+    })
+    asset = normalize_curated_asset(metadata, metadata.model_dump(mode="json"))
+    manifest = tmp_path / "atlas-curated.json"
+    manifest.write_bytes(canonical_curated_manifest(metadata))
+    replacement = tmp_path / "replacement.mp4"
+    replacement.write_bytes(source.read_bytes())
+    source.unlink()
+    source.symlink_to(replacement)
+    fake = FakeRclone()
+    storage = RcloneDriveCuratedStorageBackend(binary="rclone", remote="gdrive_javier:", root="Javier/KURUKIN_ATLAS",
+                                                runner=fake, lock_path=tmp_path / "drive.lock")
+    with pytest.raises(StorageIntegrityError, match="safely rebound"):
+        storage.store_curated_asset(metadata, asset, source, manifest, observed_package_fingerprint(asset))
+    assert fake.commands == []

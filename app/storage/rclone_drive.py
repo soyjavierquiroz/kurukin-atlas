@@ -1,4 +1,4 @@
-"""Immutable rclone/Google Drive custody for the frozen MBE five-file package.
+"""Immutable rclone/Google Drive custody for Atlas package members.
 
 Publication is source -> unique remote staging -> verified staging -> server-side
 directory move -> verified final.  The lower-level ``RemoteMember`` and remote
@@ -23,6 +23,7 @@ from typing import Any, Iterator, Sequence
 from urllib.parse import quote
 
 from app.contracts.asset_metadata_v1 import AssetMetadataV1
+from app.contracts.curated_asset_v1 import CuratedAssetV1
 from app.ingest.fingerprint import observed_package_fingerprint as fingerprint_for
 from app.ingest.normalize import NormalizedAsset, atlas_asset_uid
 from app.storage.contracts import VerifiedRenditionLocation, VerifiedStorageManifest, VerifiedStoredPackage
@@ -98,8 +99,23 @@ def _writer_lock(path: Path) -> Iterator[None]:
         os.close(fd)
 
 
-class RcloneDriveStorageBackend:
-    """Store MBE's exact five files with immutable final-revision semantics."""
+@dataclass(frozen=True)
+class PublishedRemoteDirectory:
+    """A final Drive directory already checked against every expected member."""
+
+    final_dir: str
+    verified_at: datetime
+    created: bool
+
+
+class RcloneDrivePublisher:
+    """Generic immutable Drive publication for explicit, pre-validated members.
+
+    This class deliberately owns no producer package interpretation.  Callers
+    provide the normalized identity, fingerprint, and the complete member set;
+    it supplies the one shared staging, verification, promotion, replay, and
+    URI protocol used by both MBE and curated ingestion.
+    """
 
     def __init__(self, *, binary: str, remote: str, root: str,
                  runner: RcloneCommandRunner | None = None, timeout_seconds: float = 120.0,
@@ -113,20 +129,20 @@ class RcloneDriveStorageBackend:
         self.root = _validate_root(root)
         self.timeout_seconds = float(timeout_seconds)
         self.runner = runner or SubprocessRcloneCommandRunner()
-        # The file is not opened (or its parent created) until store_package().
+        # The file is not opened (or its parent created) until publish().
         self.lock_path = (Path(lock_path) if lock_path is not None else
                           Path("/opt/apps/kurukin-atlas/data/locks/rclone-drive.lock"))
 
-    def store_package(self, metadata: AssetMetadataV1, normalized_asset: NormalizedAsset,
-                      json_path: Path, observed_package_fingerprint: str) -> VerifiedStoredPackage:
-        members = self._mbe_members(metadata, normalized_asset, Path(json_path), observed_package_fingerprint)
+    def publish(self, normalized_asset: NormalizedAsset, observed_package_fingerprint: str,
+                members: Sequence[RemoteMember]) -> PublishedRemoteDirectory:
+        """Publish exactly ``members`` or verify an immutable exact replay."""
+        self._validate_publish_inputs(normalized_asset, observed_package_fingerprint, members)
         final_dir = self._final_dir(normalized_asset, observed_package_fingerprint)
-        final_parent = self._final_parent(normalized_asset)
         with _writer_lock(self.lock_path):
             self._mkdir_final_parent(normalized_asset)
             if self._directory_exists(final_dir):
                 self._verify_directory(final_dir, members)
-                return self._result(metadata, json_path.name, final_dir, observed_package_fingerprint, created=False)
+                return PublishedRemoteDirectory(final_dir, datetime.now(timezone.utc), created=False)
 
             stage_dir = _join(self.root, "_staging", str(uuid.uuid4()))
             self._mkdir_staging(stage_dir)
@@ -144,7 +160,84 @@ class RcloneDriveStorageBackend:
                 if not promoted:
                     self._purge_staging(stage_dir)
                 raise
-            return self._result(metadata, json_path.name, final_dir, observed_package_fingerprint, created=True)
+            return PublishedRemoteDirectory(final_dir, datetime.now(timezone.utc), created=True)
+
+    def _validate_publish_inputs(self, asset: NormalizedAsset, fingerprint: str,
+                                 members: Sequence[RemoteMember]) -> None:
+        if not isinstance(fingerprint, str) or not _SHA256.fullmatch(fingerprint):
+            raise StorageInputError("observed_package_fingerprint must be a lowercase full SHA-256")
+        if fingerprint != fingerprint_for(asset):
+            raise StorageInputError("observed_package_fingerprint does not match normalized_asset")
+        if not members:
+            raise StorageInputError("Drive publication requires at least one member")
+        names: set[str] = set()
+        for member in members:
+            if not isinstance(member, RemoteMember):
+                raise StorageInputError("Drive publication members must be RemoteMember records")
+            name = member.remote_name
+            candidate = Path(name)
+            if (not isinstance(name, str) or not name or name in {".", ".."} or "/" in name or "\\" in name
+                    or candidate.is_absolute() or candidate.name != name or candidate.parts != (name,)):
+                raise StoragePathError(f"unsafe remote member filename: {name!r}")
+            if name in names:
+                raise StorageInputError("Drive publication members must have distinct filenames")
+            names.add(name)
+            if not _SHA256.fullmatch(member.sha256) or member.size_bytes < 0:
+                raise StorageInputError("Drive publication member hash or size is invalid")
+            try:
+                info = member.local_path.lstat()
+            except OSError as exc:
+                raise StoragePathError(f"cannot inspect publication member {name!r}") from exc
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise StoragePathError(f"publication member {name!r} must be a regular non-symlink file")
+            if info.st_size != member.size_bytes:
+                raise StorageIntegrityError(f"publication member {name!r}: size changed before publication")
+
+    @staticmethod
+    def safe_regular_file(source_dir: Path, name: str) -> Path:
+        """Return a package-local regular non-symlink source file."""
+        candidate = Path(name)
+        if (not isinstance(name, str) or not name or name in {".", ".."} or "/" in name or "\\" in name
+                or candidate.is_absolute() or candidate.name != name or candidate.parts != (name,)):
+            raise StoragePathError(f"unsafe package-local filename: {name!r}")
+        path = source_dir / candidate
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise StoragePathError(f"cannot inspect source {name!r}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise StoragePathError(f"source {name!r} must not be a symlink")
+        if not stat.S_ISREG(info.st_mode):
+            raise StorageInputError(f"source {name!r} must be a regular file")
+        return path
+
+    @staticmethod
+    def hash_file(path: Path) -> tuple[str, int]:
+        """Stream a regular non-symlink file through a safely opened descriptor."""
+
+        flags = os.O_RDONLY | os.O_NONBLOCK
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(path, flags)
+        except OSError as exc:
+            raise StoragePathError(f"cannot safely open source {str(path)!r}") from exc
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise StoragePathError(f"source {str(path)!r} must be a regular file")
+            with os.fdopen(fd, "rb") as stream:
+                fd = -1
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+        except OSError as exc:
+            raise StoragePathError(f"cannot read source {str(path)!r}") from exc
+        finally:
+            if fd >= 0:
+                os.close(fd)
+        return digest.hexdigest(), size
 
     def _mbe_members(self, metadata: AssetMetadataV1, asset: NormalizedAsset, json_path: Path,
                      fingerprint: str) -> tuple[RemoteMember, ...]:
@@ -167,10 +260,10 @@ class RcloneDriveStorageBackend:
                 normalized.filename, normalized.sha256, normalized.size_bytes, normalized.thumbnail
             ):
                 raise StorageInputError(f"metadata {kind} members do not match normalized_asset")
-            sources.extend(((self._safe_regular_file(source_dir, producer.file), producer.file, producer.sha256, producer.size_bytes),
-                            (self._safe_regular_file(source_dir, producer.thumbnail.file), producer.thumbnail.file,
+            sources.extend(((self.safe_regular_file(source_dir, producer.file), producer.file, producer.sha256, producer.size_bytes),
+                            (self.safe_regular_file(source_dir, producer.thumbnail.file), producer.thumbnail.file,
                              producer.thumbnail.sha256, producer.thumbnail.size_bytes)))
-        source_json = self._safe_regular_file(source_dir, json_path.name)
+        source_json = self.safe_regular_file(source_dir, json_path.name)
         self._bind_producer_json(source_json, asset)
         sources.append((source_json, json_path.name, "", None))
         names = [name for _, name, _, _ in sources]
@@ -179,7 +272,7 @@ class RcloneDriveStorageBackend:
 
         members: list[RemoteMember] = []
         for source, name, expected_hash, expected_size in sources:
-            actual_hash, actual_size = self._hash_file(source)
+            actual_hash, actual_size = self.hash_file(source)
             if expected_hash and actual_hash != expected_hash.lower():
                 raise StorageIntegrityError(f"source {name!r}: SHA-256 mismatch")
             if expected_size is not None and actual_size != expected_size:
@@ -204,33 +297,6 @@ class RcloneDriveStorageBackend:
             raise StorageInputError("source producer JSON does not validate as AssetMetadataV1") from exc
         if raw != asset.raw_producer_metadata:
             raise StorageInputError("source producer JSON does not match normalized_asset raw metadata")
-
-    @staticmethod
-    def _safe_regular_file(source_dir: Path, name: str) -> Path:
-        candidate = Path(name)
-        if (not isinstance(name, str) or not name or name in {".", ".."} or "/" in name or "\\" in name
-                or candidate.is_absolute() or candidate.name != name or candidate.parts != (name,)):
-            raise StoragePathError(f"unsafe package-local filename: {name!r}")
-        path = source_dir / candidate
-        try:
-            info = path.lstat()
-        except OSError as exc:
-            raise StoragePathError(f"cannot inspect source {name!r}") from exc
-        if stat.S_ISLNK(info.st_mode):
-            raise StoragePathError(f"source {name!r} must not be a symlink")
-        if not stat.S_ISREG(info.st_mode):
-            raise StorageInputError(f"source {name!r} must be a regular file")
-        return path
-
-    @staticmethod
-    def _hash_file(path: Path) -> tuple[str, int]:
-        digest = hashlib.sha256()
-        size = 0
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-                size += len(chunk)
-        return digest.hexdigest(), size
 
     def _final_dir(self, asset: NormalizedAsset, fingerprint: str) -> str:
         return _join(self._final_parent(asset), f"{encode_path_component(asset.producer_asset_id)}--{fingerprint}")
@@ -348,16 +414,98 @@ class RcloneDriveStorageBackend:
         # one ordinary URI decode recovers the exact rclone-relative path.
         return f"rclone://{self.remote[:-1]}/{quote(relative_path, safe='/-_.~')}"
 
-    def _result(self, metadata: AssetMetadataV1, json_name: str, final_dir: str, fingerprint: str,
-                *, created: bool) -> VerifiedStoredPackage:
+
+class RcloneDriveStorageBackend:
+    """MBE five-member adapter over the generic immutable Drive publisher."""
+
+    def __init__(self, *, binary: str, remote: str, root: str,
+                 runner: RcloneCommandRunner | None = None, timeout_seconds: float = 120.0,
+                 lock_path: str | Path | None = None) -> None:
+        self.publisher = RcloneDrivePublisher(
+            binary=binary, remote=remote, root=root, runner=runner,
+            timeout_seconds=timeout_seconds, lock_path=lock_path,
+        )
+
+    def store_package(self, metadata: AssetMetadataV1, normalized_asset: NormalizedAsset,
+                      json_path: Path, observed_package_fingerprint: str) -> VerifiedStoredPackage:
+        members = self.publisher._mbe_members(metadata, normalized_asset, Path(json_path), observed_package_fingerprint)
+        published = self.publisher.publish(normalized_asset, observed_package_fingerprint, members)
         def location(kind: str) -> VerifiedRenditionLocation:
             rendition = getattr(metadata.media, kind)
-            return VerifiedRenditionLocation(self._uri(_join(final_dir, rendition.file)),
-                                             self._uri(_join(final_dir, rendition.thumbnail.file)))
+            return VerifiedRenditionLocation(self._uri(_join(published.final_dir, rendition.file)),
+                                             self._uri(_join(published.final_dir, rendition.thumbnail.file)))
         return VerifiedStoredPackage(
             manifest=VerifiedStorageManifest(horizontal=location("horizontal"), vertical=location("vertical")),
-            destination_verified_at=datetime.now(timezone.utc), destination_base_uri=self._uri(final_dir),
-            metadata_uri=self._uri(_join(final_dir, json_name)), package_fingerprint=fingerprint, created=created,
+            destination_verified_at=published.verified_at, destination_base_uri=self._uri(published.final_dir),
+            metadata_uri=self._uri(_join(published.final_dir, Path(json_path).name)),
+            package_fingerprint=observed_package_fingerprint, created=published.created,
+        )
+
+    # Compatibility inspection seams retained for the existing Drive tests.
+    def _final_dir(self, asset: NormalizedAsset, fingerprint: str) -> str:
+        return self.publisher._final_dir(asset, fingerprint)
+
+    def _uri(self, relative_path: str) -> str:
+        return self.publisher._uri(relative_path)
+
+    def _purge_staging(self, stage_dir: str) -> None:
+        self.publisher._purge_staging(stage_dir)
+
+
+class RcloneDriveCuratedStorageBackend:
+    """Curated two-member adapter over the same immutable Drive publisher."""
+
+    manifest_name = "atlas-curated.json"
+
+    def __init__(self, *, binary: str, remote: str, root: str,
+                 runner: RcloneCommandRunner | None = None, timeout_seconds: float = 120.0,
+                 lock_path: str | Path | None = None,
+                 publisher: RcloneDrivePublisher | None = None) -> None:
+        self.publisher = publisher or RcloneDrivePublisher(
+            binary=binary, remote=remote, root=root, runner=runner,
+            timeout_seconds=timeout_seconds, lock_path=lock_path,
+        )
+
+    def store_curated_asset(self, metadata: CuratedAssetV1, normalized_asset: NormalizedAsset,
+                            source_path: Path, manifest_path: Path,
+                            observed_package_fingerprint: str) -> VerifiedStoredPackage:
+        if set(normalized_asset.renditions) != {"vertical"}:
+            raise StorageInputError("initial curated Drive custody requires exactly one vertical rendition")
+        rendition = normalized_asset.renditions["vertical"]
+        if source_path.name != rendition.filename:
+            raise StorageInputError("curated source filename does not match normalized vertical rendition")
+        if manifest_path.name != self.manifest_name:
+            raise StorageInputError("curated manifest must be named atlas-curated.json")
+        expected_raw = metadata.model_dump(mode="json")
+        if normalized_asset.raw_producer_metadata != expected_raw:
+            raise StorageInputError("curated metadata does not match normalized raw metadata")
+        expected_manifest = json.dumps(expected_raw, ensure_ascii=False, sort_keys=True,
+                                       separators=(",", ":")).encode("utf-8")
+        expected_manifest_hash = hashlib.sha256(expected_manifest).hexdigest()
+        try:
+            manifest_hash, manifest_size = RcloneDrivePublisher.hash_file(Path(manifest_path))
+            if manifest_hash != expected_manifest_hash or manifest_size != len(expected_manifest):
+                raise StorageInputError("curated manifest is not the canonical Atlas metadata bytes")
+        except StoragePathError as exc:
+            raise StoragePathError("cannot read curated manifest") from exc
+        try:
+            source_hash, source_size = RcloneDrivePublisher.hash_file(Path(source_path))
+        except StoragePathError as exc:
+            raise StorageIntegrityError("curated source cannot be safely rebound before publication") from exc
+        if source_hash != rendition.sha256 or source_size != rendition.size_bytes:
+            raise StorageIntegrityError("curated source bytes do not match normalized vertical rendition")
+        video = RemoteMember(Path(source_path), rendition.filename, source_hash, source_size)
+        manifest = RemoteMember(Path(manifest_path), self.manifest_name, manifest_hash, manifest_size)
+        published = self.publisher.publish(normalized_asset, observed_package_fingerprint, (video, manifest))
+        return VerifiedStoredPackage(
+            manifest=VerifiedStorageManifest({"vertical": VerifiedRenditionLocation(
+                self.publisher._uri(_join(published.final_dir, rendition.filename)), None,
+            )}),
+            destination_verified_at=published.verified_at,
+            destination_base_uri=self.publisher._uri(published.final_dir),
+            metadata_uri=self.publisher._uri(_join(published.final_dir, self.manifest_name)),
+            package_fingerprint=observed_package_fingerprint,
+            created=published.created,
         )
 
 

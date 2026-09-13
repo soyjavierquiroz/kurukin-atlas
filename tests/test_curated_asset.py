@@ -128,6 +128,10 @@ def test_curated_contract_rejects_duplicate_or_unsupported_rendition_kinds() -> 
     data["renditions"][0]["kind"] = "square"
     with pytest.raises(ValueError):
         CuratedAssetV1.model_validate(data)
+    data = curated().model_dump(mode="python")
+    data["metadata_source"] = "none"
+    with pytest.raises(ValueError, match="semantic claims"):
+        CuratedAssetV1.model_validate(data)
 
 
 def test_writer_removes_stale_horizontal_and_preserves_vertical_uid() -> None:

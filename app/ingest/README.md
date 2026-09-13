@@ -1,5 +1,47 @@
 # Synchronous MBE package ingest
 
+## MBE outbox discovery and P0 batch selection
+
+`discovery.discover_mbe_packages(outbox)` is a read-only, root-level `*.json`
+scan of the configured MBE outbox. It never recurses into `review/`, hidden or
+arbitrary nested directories, reads no database, contacts no storage backend,
+and does not hash media. JSON filename lexical order is the explicit stable
+order for resumable batches.
+
+Discovery is cheap readiness/selection only. A package is `READY` when its
+producer JSON parses as `AssetMetadataV1`, declares the supported v1 contract,
+and that JSON plus its four distinct producer-referenced members are currently
+present as regular, non-symlink files. Missing members are `NOT_READY`:
+incomplete means wait, not an error. Malformed JSON, unsupported contract,
+unsafe paths, duplicate names, symlinks, and non-regular members are `INVALID`
+and need operator attention.
+
+`batch.ingest_mbe_batch(outbox, storage_backend, session_factory,
+placement_resolver, limit=None, dry_run=False)` is the sequential P0 application
+primitive. The trusted caller-supplied placement resolver maps parsed producer
+metadata to `CatalogPlacement`; discovery knows nothing about title taxonomy.
+It calls the existing `ingest_package()` for each selected `READY` package, so
+authoritative validation, trust, hashing, Drive handoff, DB transaction, and
+verification remain in exactly one implementation.
+
+`limit` is a bound on selected `READY` packages (not all JSONs encountered), in
+lexical order; `NOT_READY` entries do not consume it. Placement resolution is
+part of selected READY work, so a resolver failure consumes one selected slot.
+A normal batch continues after an individual package failure and records the
+failure per package. In batch results, `BatchPackageStatus.READY` means
+discovered READY but not attempted because the limit was reached or
+`stop_on_error` halted subsequent work.
+`dry_run=True` only discovers and resolves the selected placements: it does not
+call `ingest_package()`, storage, or the database. No discovery or batch path
+renames, moves, deletes, changes permissions on, or otherwise mutates source
+files; `ATLAS_SOURCE_CLEANUP_ENABLED` remains irrelevant and false.
+
+For the explicit current-title mapping only, a small executable is available:
+`python -m app.ingest.batch_mbe --source-movie-id ... --title-id ... --outbox
+... --limit ... --dry-run`. The source/title mapping is always explicit, even
+for dry runs. It uses the active configured storage backend as-is (local stays
+local; it never silently selects Drive) and exposes no cleanup option.
+
 `orchestrator.ingest_package(json_path, placement, storage_backend,
 session_factory, stability_seconds=1.0, sleep=time.sleep)` processes one package.
 Pass an explicit `CatalogPlacement`, `StorageBackend`, and SQLAlchemy

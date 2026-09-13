@@ -86,7 +86,7 @@ class AssetCandidateV1(BaseModel):
 
 
 class AssetCandidatesV1(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", title="asset_candidates_v1")
     schema_version: Literal["asset_candidates_v1"] = "asset_candidates_v1"
     candidates: list[AssetCandidateV1] = Field(default_factory=list)
     scarcity_reason: ScarcityReason | None = None

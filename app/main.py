@@ -1,4 +1,4 @@
-"""Atlas HTTP API package."""
+"""ASGI entrypoint: ``uvicorn app.main:app``."""
 
 from app.api.main import app, create_app
 

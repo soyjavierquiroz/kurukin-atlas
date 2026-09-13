@@ -53,7 +53,7 @@ class SubprocessRcloneCommandRunner:
 
         try:
             process = subprocess.Popen(
-                list(args), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                list(args), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=False,
             )
         except FileNotFoundError as exc:
             raise RcloneTransportError("rclone executable was not found") from exc
@@ -94,10 +94,21 @@ class SubprocessRcloneCommandRunner:
         """Best-effort cleanup that must not obscure the stream failure."""
 
         try:
+            process.terminate()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=1)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        except OSError:
+            return
+        try:
             process.kill()
         except OSError:
             pass
         try:
-            process.communicate()
-        except OSError:
+            process.wait(timeout=1)
+        except (OSError, subprocess.TimeoutExpired):
             pass

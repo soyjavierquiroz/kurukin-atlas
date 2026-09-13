@@ -106,7 +106,7 @@ class AssetPreferencesV1(BaseModel):
 class AssetSearchV1(BaseModel):
     """Public request boundary for provider-local Atlas search."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", title="asset_search_v1")
 
     schema_version: Literal["asset_search_v1"]
     query: str = ""

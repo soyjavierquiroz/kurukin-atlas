@@ -84,7 +84,7 @@ def test_health_and_search_contracts_preserve_hard_scope_and_scarcity():
     row = SearchCandidateEvidence(
         asset_uid=str(ASSET_UID), producer="mbe", source_kind="movie", source_key="s", producer_asset_id="p",
         catalog_scope="title", title_id="t-1", visual_summary="conversation",
-        renditions={"horizontal": SearchRenditionEvidence("horizontal", True)},
+        renditions={"horizontal": SearchRenditionEvidence("horizontal", True, duration_seconds=6.25)},
     )
     with client(search=SearchRepository((row,))) as http:
         assert http.get("/healthz").json() == {"status": "ok"}
@@ -93,11 +93,27 @@ def test_health_and_search_contracts_preserve_hard_scope_and_scarcity():
         assert found.json()["schema_version"] == "asset_candidates_v1"
         locator = found.json()["candidates"][0]["selected_rendition"]["content_locator"]
         assert locator == f"/v1/assets/{ASSET_UID}/renditions/horizontal/content"
+        assert found.json()["candidates"][0]["selected_rendition"]["duration_seconds"] == 6.25
         assert "file:" not in found.text and "rclone:" not in found.text
     with client() as http:
         scarce = http.post("/v1/assets/search", json=search_body())
         assert scarce.status_code == 200
         assert scarce.json()["scarcity_reason"] == "no_candidates_in_scope"
+
+
+@pytest.mark.parametrize("stored_duration", [float("nan"), float("inf"), float("-inf")])
+def test_search_json_never_emits_nonfinite_duration(stored_duration):
+    row = SearchCandidateEvidence(
+        asset_uid=str(ASSET_UID), producer="mbe", source_kind="movie", source_key="s", producer_asset_id="p",
+        catalog_scope="title", title_id="t-1", visual_summary="conversation",
+        renditions={"horizontal": SearchRenditionEvidence("horizontal", True, duration_seconds=stored_duration)},
+    )
+    with client(search=SearchRepository((row,))) as http:
+        found = http.post("/v1/assets/search", json=search_body())
+    assert found.status_code == 200
+    selected = found.json()["candidates"][0]["selected_rendition"]
+    assert selected["duration_seconds"] is None
+    assert "NaN" not in found.text and "Infinity" not in found.text
 
 
 def test_search_capacity_and_validation_use_sanitized_error_contract():

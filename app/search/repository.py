@@ -48,7 +48,12 @@ class SqlAlchemySearchRepository:
         for asset in assets:
             semantics = asset.semantics
             renditions = {
-                rendition.kind: SearchRenditionEvidence(rendition.kind, rendition.thumbnail_uri is not None, rendition.semantic_overrides or {})
+                rendition.kind: SearchRenditionEvidence(
+                    rendition.kind,
+                    rendition.thumbnail_uri is not None,
+                    rendition.semantic_overrides or {},
+                    rendition.duration_seconds,
+                )
                 for rendition in asset.renditions
             }
             rows.append(SearchCandidateEvidence(

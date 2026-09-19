@@ -14,6 +14,7 @@ from typing import Any, Protocol, Sequence
 from app.contracts.asset_candidates_v1 import (
     AssetCandidateV1, AssetCandidatesV1, CatalogPlacementV1, ProducerEditorialEvidenceV1,
     RequirementMatchV1, ScoreComponentsV1, SelectedRenditionV1, SourceProvenanceV1,
+    normalize_duration_seconds,
 )
 from app.contracts.asset_search_v1 import AssetSearchV1, RenditionKind, SearchScopeV1
 
@@ -50,6 +51,7 @@ class SearchRenditionEvidence:
     kind: RenditionKind
     thumbnail_present: bool = False
     semantic_overrides: dict[str, Any] = field(default_factory=dict)
+    duration_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,7 @@ def _candidate(candidate: SearchCandidateEvidence, request: AssetSearchV1, rendi
         selected_rendition=SelectedRenditionV1(
             kind=rendition.kind, content_locator=f"/v1/assets/{candidate.asset_uid}/renditions/{rendition.kind}/content",
             thumbnail_locator=(f"/v1/assets/{candidate.asset_uid}/renditions/{rendition.kind}/thumbnail" if rendition.thumbnail_present else None),
+            duration_seconds=normalize_duration_seconds(rendition.duration_seconds),
         ), evidence=evidence, requirement_matches=matches, contradictions=contradictions,
         confidence="high" if high else "uncertain",
         score_components=ScoreComponentsV1(lexical_relevance=lexical, structured_match=round(structured, 6),

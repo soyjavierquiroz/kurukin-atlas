@@ -5,10 +5,14 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from app.contracts.asset_candidates_v1 import SelectedRenditionV1
 from app.contracts.asset_search_v1 import AssetSearchV1
 from app.search.errors import SearchPoolCapacityError
 from app.search.repository import SqlAlchemySearchRepository
-from app.search.service import SearchCandidateEvidence, SearchRenditionEvidence, _state_for_terms, search_assets
+from app.search.service import (
+    SearchCandidateEvidence, SearchRenditionEvidence, _state_for_terms,
+    normalize_duration_seconds, search_assets,
+)
 
 
 class Repository:
@@ -23,10 +27,14 @@ class Repository:
 
 def item(uid, *, scope="general", title_id=None, brand_id=None, renditions=("horizontal",), **values):
     overrides = values.pop("overrides", {})
+    durations = values.pop("durations", {})
     return SearchCandidateEvidence(
         asset_uid=uid, producer="mbe", source_kind="movie", source_key="source", producer_asset_id=f"producer-{uid}", catalog_scope=scope,
         title_id=title_id, brand_id=brand_id,
-        renditions={kind: SearchRenditionEvidence(kind, kind == "horizontal", overrides.get(kind, {})) for kind in renditions},
+        renditions={
+            kind: SearchRenditionEvidence(kind, kind == "horizontal", overrides.get(kind, {}), durations.get(kind))
+            for kind in renditions
+        },
         **values,
     )
 
@@ -150,6 +158,45 @@ def test_limit_scarcity_and_public_identity():
     assert result(rows, query="absent").scarcity_reason == "no_high_confidence_match"
 
 
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (12.5, 12.5), (None, None), (0, None), (-1, None),
+        (float("nan"), None), (float("inf"), None), (float("-inf"), None),
+        (True, None), (False, None), ("12.5", None),
+    ],
+)
+def test_public_duration_normalization(stored, expected):
+    assert normalize_duration_seconds(stored) == expected
+
+
+def test_selected_rendition_duration_is_additive_and_selected_rendition_specific():
+    legacy = SelectedRenditionV1(kind="horizontal", content_locator="/content")
+    assert legacy.duration_seconds is None
+    assert SelectedRenditionV1(kind="horizontal", content_locator="/content", duration_seconds=True).duration_seconds is None
+
+    row = item("a", renditions=("horizontal", "vertical"), durations={"horizontal": 12.5, "vertical": 7.25})
+    horizontal = result([row], preferences={"preferred_rendition_kind": "horizontal"}).candidates[0]
+    vertical = result([row], preferences={"preferred_rendition_kind": "vertical"}).candidates[0]
+
+    assert horizontal.selected_rendition.kind == "horizontal"
+    assert horizontal.selected_rendition.duration_seconds == 12.5
+    assert vertical.selected_rendition.kind == "vertical"
+    assert vertical.selected_rendition.duration_seconds == 7.25
+    assert horizontal.asset_uid == vertical.asset_uid == "a"
+    assert horizontal.selected_rendition.content_locator.endswith("/horizontal/content")
+    assert vertical.selected_rendition.content_locator.endswith("/vertical/content")
+    assert horizontal.selected_rendition.thumbnail_locator is not None
+    assert vertical.selected_rendition.thumbnail_locator is None
+
+
+def test_duration_does_not_affect_candidate_ordering_or_ranking():
+    rows = [item("a", visual_summary="happy couple", durations={"horizontal": 1}), item("b", visual_summary="happy couple", durations={"horizontal": 99})]
+    found = result(rows, query="happy couple", minimum_confidence="any_eligible")
+    assert [candidate.asset_uid for candidate in found.candidates] == ["a", "b"]
+    assert found.candidates[0].atlas_local_score == found.candidates[1].atlas_local_score
+
+
 class FakeScalarResult:
     def __init__(self, assets):
         self.assets = assets
@@ -192,3 +239,15 @@ def test_sql_repository_raises_on_pool_limit_plus_one_without_partial_rows():
     session = FakeSqlSession([sql_asset("a"), sql_asset("b"), sql_asset("c")])
     with pytest.raises(SearchPoolCapacityError):
         search_assets(SqlAlchemySearchRepository(session), request({"kind": "general"}), pool_limit=2)
+
+
+def test_sql_repository_uses_stored_rendition_duration():
+    stored_rendition = SimpleNamespace(
+        kind="horizontal", thumbnail_uri=None, semantic_overrides={}, duration_seconds=8.5,
+    )
+    stored_asset = sql_asset("a")
+    stored_asset.renditions = [stored_rendition]
+    rows = SqlAlchemySearchRepository(FakeSqlSession([stored_asset])).fetch_candidates(
+        request({"kind": "general"}).scope, pool_limit=1,
+    )
+    assert rows[0].renditions["horizontal"].duration_seconds == 8.5

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from math import isfinite
+from numbers import Real
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 MatchState = Literal["MATCH", "UNKNOWN", "MISMATCH"]
@@ -12,6 +14,15 @@ Confidence = Literal["high", "uncertain"]
 ScarcityReason = Literal[
     "no_candidates_in_scope", "no_requirement_match", "no_high_confidence_match", "no_acceptable_rendition",
 ]
+
+
+def normalize_duration_seconds(value: Any) -> float | None:
+    """Return only a finite, positive stored rendition duration for public output."""
+
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    duration = float(value)
+    return duration if isfinite(duration) and duration > 0 else None
 
 
 class CatalogPlacementV1(BaseModel):
@@ -33,6 +44,12 @@ class SelectedRenditionV1(BaseModel):
     kind: Literal["horizontal", "vertical"]
     content_locator: str
     thumbnail_locator: str | None = None
+    duration_seconds: float | None = None
+
+    @field_validator("duration_seconds", mode="before")
+    @classmethod
+    def normalize_duration(cls, value: Any) -> float | None:
+        return normalize_duration_seconds(value)
 
 
 class ProducerEditorialEvidenceV1(BaseModel):

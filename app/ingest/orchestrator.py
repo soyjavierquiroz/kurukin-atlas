@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.contracts.asset_metadata_v1 import AssetMetadataV1
 from app.ingest.catalog import CatalogIngestRequest, CatalogPlacement, catalog_validated_asset
 from app.ingest.fingerprint import observed_package_fingerprint
-from app.ingest.normalize import normalize_metadata
+from app.ingest.normalize import NormalizedAsset, normalize_metadata
 from app.ingest.package import (
     PackageReadiness, UnsafePackagePathError, package_readiness,
     safe_package_path, validate_referenced_bytes,
@@ -81,6 +81,8 @@ def ingest_package(
     session_factory: sessionmaker[Session],
     stability_seconds: float = 1.0,
     sleep: Callable[[float], None] = time.sleep,
+    normalizer: Callable[[AssetMetadataV1, dict], NormalizedAsset] = normalize_metadata,
+    metadata_validator: Callable[[AssetMetadataV1, dict], None] | None = None,
 ) -> IngestResult:
     """Validate, copy/verify, commit catalog, then verify through a new DB session.
 
@@ -111,10 +113,12 @@ def ingest_package(
     except FileNotFoundError:
         return not_ready
     validate_trust(metadata)
+    if metadata_validator is not None:
+        metadata_validator(metadata, raw)
     validation = validate_referenced_bytes(metadata, path.parent)
     if validation.readiness != PackageReadiness.VALID:
         raise PackageValidationError("; ".join(validation.errors))
-    asset = normalize_metadata(metadata, raw)
+    asset = normalizer(metadata, raw)
     fingerprint = observed_package_fingerprint(asset)
     stored = storage_backend.store_package(metadata, asset, path, fingerprint)
     if stored.package_fingerprint != fingerprint:

@@ -88,8 +88,11 @@ class LocalStorageBackend:
         if fingerprint != fingerprint_for(asset):
             raise StorageInputError("observed_package_fingerprint does not match normalized_asset")
         # Structural consistency only: do not repeat semantic/trust validation.
-        identity = (metadata.analysis.producer, metadata.asset.source_movie_id, metadata.asset.id)
-        if identity != (asset.producer, asset.source_key, asset.producer_asset_id) or asset.asset_uid != atlas_asset_uid(*identity):
+        # ``source_key`` is Atlas-owned identity.  It can deliberately be an
+        # episode key while producer ``source_movie_id`` stays unmodified in
+        # the retained producer JSON.
+        if ((metadata.analysis.producer, metadata.asset.id) != (asset.producer, asset.producer_asset_id)
+                or asset.asset_uid != atlas_asset_uid(asset.producer, asset.source_key, asset.producer_asset_id)):
             raise StorageInputError("metadata identity does not match normalized_asset")
         for kind in ("horizontal", "vertical"):
             producer = getattr(metadata.media, kind)

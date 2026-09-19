@@ -102,11 +102,19 @@ def _rendition(kind: str, item: Rendition) -> NormalizedRendition:
                                item.semantic_validated, item.thumbnail.model_dump(mode="python"))
 
 
-def normalize_metadata(metadata: AssetMetadataV1, raw_metadata: dict[str, Any]) -> NormalizedAsset:
-    """Adapt frozen MBE metadata; source_movie_id remains external-contract only."""
+def normalize_metadata(metadata: AssetMetadataV1, raw_metadata: dict[str, Any], *,
+                       source_key: str | None = None) -> NormalizedAsset:
+    """Adapt frozen MBE metadata into Atlas identity.
+
+    ``source_movie_id`` remains the producer-contract fact.  A trusted Atlas
+    import boundary may supply a different, explicit source key (for example an
+    episode key) without rewriting that producer fact or its retained raw JSON.
+    """
 
     visual = metadata.visual
-    source_key = metadata.asset.source_movie_id
+    source_key = metadata.asset.source_movie_id if source_key is None else source_key
+    if not isinstance(source_key, str) or not source_key.strip() or source_key != source_key.strip():
+        raise ValueError("source_key must be a non-empty normalized string")
     return NormalizedAsset(
         asset_uid=atlas_asset_uid(metadata.analysis.producer, source_key, metadata.asset.id),
         producer=metadata.analysis.producer, producer_asset_id=metadata.asset.id,

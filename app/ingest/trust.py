@@ -37,7 +37,11 @@ def validate_trust(metadata: AssetMetadataV1) -> None:
         failures.append("analysis.semantic_ready must be true")
     if not metadata.analysis.final_asset_semantics_validated:
         failures.append("analysis.final_asset_semantics_validated must be true")
-    if metadata.editorial.decision != "KEEP":
-        failures.append("editorial.decision must be KEEP")
+    # Editorial eligibility is an operator policy layered on top of this
+    # producer-trust boundary.  Keep accepts the legacy producer spelling;
+    # PASS and REVIEW retain their distinct producer facts for the operator to
+    # evaluate (REVIEW must separately carry human approval there).
+    if metadata.editorial.decision.strip().upper() not in {"KEEP", "PASS", "REVIEW"}:
+        failures.append("editorial.decision must be KEEP, PASS, or REVIEW")
     if failures:
         raise TrustContractError("TRUST PRODUCER SEMANTICS failed: " + "; ".join(failures))

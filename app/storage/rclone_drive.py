@@ -245,8 +245,11 @@ class RcloneDrivePublisher:
             raise StorageInputError("observed_package_fingerprint must be a lowercase full SHA-256")
         if fingerprint != fingerprint_for(asset):
             raise StorageInputError("observed_package_fingerprint does not match normalized_asset")
-        identity = (metadata.analysis.producer, metadata.asset.source_movie_id, metadata.asset.id)
-        if identity != (asset.producer, asset.source_key, asset.producer_asset_id) or asset.asset_uid != atlas_asset_uid(*identity):
+        # Atlas may explicitly scope this producer package by episode key.
+        # The producer source_movie_id remains in the uploaded raw JSON and is
+        # never rewritten merely to make that Atlas mapping fit.
+        if ((metadata.analysis.producer, metadata.asset.id) != (asset.producer, asset.producer_asset_id)
+                or asset.asset_uid != atlas_asset_uid(asset.producer, asset.source_key, asset.producer_asset_id)):
             raise StorageInputError("metadata identity does not match normalized_asset")
         if set(asset.renditions) != {"horizontal", "vertical"}:
             raise StorageInputError("Drive MBE custody requires horizontal and vertical renditions")
